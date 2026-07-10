@@ -76,12 +76,82 @@ def increment_for(amount):
     return inc
 
 
+def fmt_indian(amount):
+    """Indian digit grouping: 1234567 -> '12,34,567'."""
+    amount = float(amount)
+    neg = amount < 0
+    amount = abs(amount)
+    whole = int(amount)
+    frac = round(amount - whole, 2)
+    s = str(whole)
+    if len(s) > 3:
+        head, tail = s[:-3], s[-3:]
+        parts = []
+        while len(head) > 2:
+            parts.insert(0, head[-2:])
+            head = head[:-2]
+        if head:
+            parts.insert(0, head)
+        s = ",".join(parts + [tail])
+    if frac:
+        s += f"{frac:.2f}"[1:]
+    return ("-" if neg else "") + s
+
+
 def fmt_money(amount):
     cur = st.session_state.config["currency"]
+    return f"{cur}{fmt_indian(amount)}"
+
+
+_ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight",
+         "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen",
+         "Sixteen", "Seventeen", "Eighteen", "Nineteen"]
+_TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy",
+         "Eighty", "Ninety"]
+
+
+def _two_digits(n):
+    if n < 20:
+        return _ONES[n]
+    return (_TENS[n // 10] + (" " + _ONES[n % 10] if n % 10 else "")).strip()
+
+
+def amount_in_words(amount):
+    """Indian system words: 1234567 -> 'Twelve Lakh Thirty-Four Thousand ...'."""
     amount = float(amount)
-    if amount == int(amount):
-        return f"{cur}{int(amount):,}"
-    return f"{cur}{amount:,.2f}"
+    if amount < 0:
+        return "Minus " + amount_in_words(-amount)
+    n = int(amount)
+    paise = int(round((amount - n) * 100))
+
+    def words(n):
+        if n == 0:
+            return "Zero"
+        parts = []
+        crore = n // 10**7
+        if crore:
+            parts.append(words(crore) + " Crore")
+        n %= 10**7
+        lakh = n // 10**5
+        if lakh:
+            parts.append(_two_digits(lakh) + " Lakh")
+        n %= 10**5
+        thousand = n // 1000
+        if thousand:
+            parts.append(_two_digits(thousand) + " Thousand")
+        n %= 1000
+        hundred = n // 100
+        if hundred:
+            parts.append(_ONES[hundred] + " Hundred")
+        n %= 100
+        if n:
+            parts.append(_two_digits(n))
+        return " ".join(parts)
+
+    text = words(n)
+    if paise:
+        text += f" and {_two_digits(paise)} Paise"
+    return text
 
 
 def get_team(name):
@@ -298,7 +368,7 @@ tab_auction, tab_dash, tab_log, tab_players, tab_teams, tab_setup = st.tabs(
 with tab_setup:
     st.subheader("Tournament settings")
     st.caption("Sport-agnostic — set these once per tournament and reuse the app anywhere.")
-    with st.form("setup_form"):
+    with st.container(border=True):
         c1, c2 = st.columns(2)
         name = c1.text_input("Tournament name", cfg["tournament_name"])
         sport = c2.text_input("Sport", cfg["sport"])
@@ -306,8 +376,10 @@ with tab_setup:
         currency = c1.text_input("Currency symbol", cfg["currency"])
         purse = c2.number_input("Default purse per team", min_value=0.0,
                                 value=float(cfg["default_purse"]), step=500.0)
+        c2.caption(f"{fmt_money(purse)} — **{amount_in_words(purse)}**")
         base = c3.number_input("Default base price", min_value=0.0,
                                value=float(cfg["default_base_price"]), step=50.0)
+        c3.caption(f"{fmt_money(base)} — **{amount_in_words(base)}**")
         c1, c2 = st.columns(2)
         min_sq = c1.number_input("Min squad size", min_value=1,
                                  value=int(cfg["min_squad_size"]))
@@ -318,7 +390,7 @@ with tab_setup:
             cfg["increment_slabs"],
             help="e.g. `0:100, 2000:250, 5000:500` → +100 below 2000, +250 from 2000, +500 from 5000",
         )
-        if st.form_submit_button("Save settings", type="primary"):
+        if st.button("Save settings", type="primary"):
             cfg.update({
                 "tournament_name": name, "sport": sport, "currency": currency,
                 "default_purse": purse, "default_base_price": base,
@@ -348,14 +420,16 @@ with tab_setup:
 
 with tab_teams:
     st.subheader("Teams & captains")
-    with st.form("add_team", clear_on_submit=True):
+    with st.container(border=True):
         c1, c2, c3, c4 = st.columns([3, 3, 2, 1])
-        t_name = c1.text_input("Team name")
-        t_captain = c2.text_input("Captain")
+        t_name = c1.text_input("Team name", key="add_team_name")
+        t_captain = c2.text_input("Captain", key="add_team_captain")
         t_purse = c3.number_input("Purse", min_value=0.0,
-                                  value=float(cfg["default_purse"]), step=500.0)
+                                  value=float(cfg["default_purse"]), step=500.0,
+                                  key="add_team_purse")
+        c3.caption(f"{fmt_money(t_purse)} — **{amount_in_words(t_purse)}**")
         c4.markdown("&nbsp;")
-        if c4.form_submit_button("➕ Add", width="stretch"):
+        if c4.button("➕ Add", width="stretch"):
             if not t_name.strip():
                 st.error("Team name is required.")
             elif get_team(t_name.strip()):
@@ -363,6 +437,8 @@ with tab_teams:
             else:
                 st.session_state.teams.append(
                     {"name": t_name.strip(), "captain": t_captain.strip(), "purse": t_purse})
+                for k in ("add_team_name", "add_team_captain", "add_team_purse"):
+                    del st.session_state[k]
                 st.rerun()
 
     if st.session_state.teams:
@@ -428,23 +504,28 @@ with tab_players:
 
     with man_col:
         st.markdown("**Add manually**")
-        with st.form("add_player", clear_on_submit=True):
-            p_name = st.text_input("Name")
+        with st.container(border=True):
+            p_name = st.text_input("Name", key="add_player_name")
             c1, c2 = st.columns(2)
-            p_role = c1.text_input("Role / category",
+            p_role = c1.text_input("Role / category", key="add_player_role",
                                    help="e.g. Singles, Doubles, Batter, Striker …")
             p_base = c2.number_input("Base price", min_value=0.0,
-                                     value=float(cfg["default_base_price"]), step=50.0)
+                                     value=float(cfg["default_base_price"]), step=50.0,
+                                     key="add_player_base")
+            c2.caption(f"{fmt_money(p_base)} — **{amount_in_words(p_base)}**")
             c1, c2 = st.columns(2)
-            p_rating = c1.text_input("Rating / grade")
-            p_notes = c2.text_input("Notes")
-            if st.form_submit_button("➕ Add player"):
+            p_rating = c1.text_input("Rating / grade", key="add_player_rating")
+            p_notes = c2.text_input("Notes", key="add_player_notes")
+            if st.button("➕ Add player"):
                 if not p_name.strip():
                     st.error("Name is required.")
                 elif p_name.strip().lower() in {p["name"].lower() for p in st.session_state.players}:
                     st.error("A player with that name already exists.")
                 else:
                     add_player(p_name, p_role, p_base, p_rating, p_notes)
+                    for k in ("add_player_name", "add_player_role", "add_player_base",
+                              "add_player_rating", "add_player_notes"):
+                        del st.session_state[k]
                     st.rerun()
 
     st.divider()
@@ -536,6 +617,7 @@ with tab_auction:
                     if bid:
                         st.metric("Current bid", fmt_money(bid["amount"]),
                                   delta=bid["team"])
+                        st.caption(f"🔤 {amount_in_words(bid['amount'])}")
                     else:
                         st.metric("Current bid", "—", delta="awaiting first bid")
 
@@ -573,6 +655,7 @@ with tab_auction:
                                  else bid["amount"] + increment_for(bid["amount"]))
                 jump_amt = c2.number_input("Amount", min_value=min_jump, value=min_jump,
                                            step=float(increment_for(cur_amount)))
+                c2.caption(f"{fmt_money(jump_amt)} — **{amount_in_words(jump_amt)}**")
                 c3.markdown("&nbsp;")
                 if c3.button("Place bid", width="stretch"):
                     if team_is_full(jump_team):
