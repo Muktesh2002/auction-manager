@@ -1,13 +1,19 @@
-name,role,base_price,rating,notes
-Arjun Mehta,Singles,500,A,State-level player
-Priya Sharma,Doubles,500,A,Strong net play
-Rahul Verma,Singles,500,B,
-Sneha Iyer,Mixed Doubles,500,A,Left-handed
-Karan Patel,Doubles,500,B,Good smashes
-Divya Nair,Singles,500,B,
-Amit Kulkarni,Doubles,500,C,Beginner-friendly
-Riya Das,Mixed Doubles,500,B,
-Vikram Singh,Singles,500,A,Aggressive baseline game
-Ananya Rao,Doubles,500,C,
-Rohan Joshi,Singles,500,B,Fast footwork
-Meera Krishnan,Mixed Doubles,500,B,
+name,category,age,base_price,notes
+Arjun Mehta,U19,17,100000,State-level player
+Rahul Verma,U19,18,100000,
+Divya Nair,U19,16,100000,Fast footwork
+Rohan Joshi,U19,17,100000,
+Ananya Rao,U19,18,100000,
+Kabir Shah,U19,17,100000,Left-handed
+Vikram Singh,Open Men,24,100000,Aggressive baseline game
+Karan Patel,Open Men,28,100000,Good smashes
+Amit Kulkarni,Open Men,31,100000,
+Sandeep Rao,Open Men,26,100000,Strong net play
+Nikhil Menon,Open Men,29,100000,
+Farhan Ali,Open Men,22,100000,
+Suresh Iyer,Open Men,35,100000,Veteran
+Manish Gupta,Open Men,27,100000,
+Deepak Nair,Open Men,30,100000,
+Ajay Kumar,Open Men,25,100000,
+Pranav Desai,Open Men,23,100000,All-rounder
+Harsha Reddy,Open Men,28,100000,
