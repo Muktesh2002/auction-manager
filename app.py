@@ -5,9 +5,10 @@ A sport-agnostic Streamlit app to run and track player auctions
 
 The auction is conducted CATEGORY-WISE: each category (e.g. U19, Open Men)
 has its own number of players per team and its own spending cap. Money left
-over in one category's cap does NOT carry into another category — but every
-purchase also draws from the team's TOTAL purse, and total purse remaining
-is the tiebreaker when two teams bid the same amount.
+over in a category's cap once a team is done there CARRIES FORWARD: it is
+added back to the purse and raises that team's cap in the next category.
+Every purchase also draws from the team's TOTAL purse, and total purse
+remaining is the tiebreaker when two teams bid the same amount.
 
 Run with:  streamlit run app.py
 """
@@ -40,7 +41,8 @@ DEFAULT_CONFIG = {
 }
 
 # Each category: how many players every team picks in it, and the max a team
-# may spend inside it. Caps are independent — leftovers do not roll over.
+# may spend inside it. Leftover cap money rolls forward once a team finishes
+# a category, raising its cap in the categories that follow.
 DEFAULT_CATEGORIES = [
     {"name": "U19", "slots_per_team": 2, "max_cap": 4000000},
     {"name": "Open Men", "slots_per_team": 4, "max_cap": 6000000},
@@ -239,12 +241,47 @@ def team_total_left(team_name):
     return team["purse"] - team_spent(team_name)
 
 
+def category_released(team_name, category):
+    """A category's cap money is freed up for a team once it can no longer
+    spend there: its slots are filled, or the category has run out of
+    available players."""
+    if team_slots_left(team_name, category) <= 0:
+        return True
+    cat_players = [p for p in st.session_state.players
+                   if p["category"] == category]
+    return bool(cat_players) and not any(p["status"] == "available"
+                                         for p in cat_players)
+
+
+def team_carryover(team_name, category):
+    """Money carried into this category for a team: the leftover cap from
+    every category it has already finished (minus any overspend there that
+    was itself funded by earlier carry-over)."""
+    carry = 0
+    for c in st.session_state.categories:
+        if c["name"] == category:
+            continue
+        if category_released(team_name, c["name"]):
+            carry += c["max_cap"] - team_spent(team_name, c["name"])
+    return carry
+
+
+def team_effective_cap(team_name, category):
+    """Total a captain can spend in this category:
+    the category's set cap PLUS the carry-over from finished categories."""
+    cat = get_category(category)
+    if cat is None:
+        return 0
+    return cat["max_cap"] + team_carryover(team_name, category)
+
+
 def team_cap_left(team_name, category):
-    """Spending room left inside a category's cap (does not roll over)."""
+    """Spending room left inside a category's effective cap
+    (set cap + carry-over - already spent here)."""
     cat = get_category(category)
     if cat is None:
         return team_total_left(team_name)
-    return cat["max_cap"] - team_spent(team_name, category)
+    return team_effective_cap(team_name, category) - team_spent(team_name, category)
 
 
 def team_spendable(team_name, category):
@@ -582,7 +619,8 @@ with tab_setup:
     st.subheader("🏷️ Categories")
     st.caption("The auction runs one category at a time. Each category sets how many "
                "players every team must pick and the max a team can spend in it. "
-               "**Unspent cap does not carry over to other categories.**")
+               "**Unspent cap carries forward: once a team finishes a category, "
+               "the leftover raises its cap in the next one.**")
     cat_df = pd.DataFrame(st.session_state.categories)
     edited = st.data_editor(
         cat_df,
@@ -857,7 +895,7 @@ with tab_auction:
 
         if ss.current_category is None:
             st.info("👆 Pick a category to auction. Finish a category before moving on — "
-                    "leftover cap money does **not** carry over.")
+                    "leftover cap money **carries forward** into the next category.")
         else:
             cat = get_category(ss.current_category)
             cname = cat["name"]
@@ -871,10 +909,12 @@ with tab_auction:
                 tn = t["name"]
                 color, light = team_color(tn)
                 cap_left = team_cap_left(tn, cname)
+                carry = team_carryover(tn, cname)
+                eff_cap = team_effective_cap(tn, cname)
                 spendable = team_spendable(tn, cname)
                 slots = team_slots_left(tn, cname)
                 filled = cat["slots_per_team"] - slots
-                pct = max(0.0, min(1.0, cap_left / cat["max_cap"])) if cat["max_cap"] else 0
+                pct = max(0.0, min(1.0, cap_left / eff_cap)) if eff_cap else 0
                 with tcols[i % len(tcols)]:
                     st.markdown(f"""
                     <div class="team-card" style="background:linear-gradient(135deg,{color},{color}cc)">
@@ -883,6 +923,8 @@ with tab_auction:
                       <div class="tsub">spendable now in {cname}</div>
                       <div class="capbar"><div style="width:{pct*100:.0f}%"></div></div>
                       <div class="tsub" style="margin-top:6px">
+                        cap {fmt_short(cat['max_cap'])} + carry-over {fmt_short(carry)}
+                        = <b>{fmt_short(eff_cap)}</b><br>
                         cap left {fmt_short(cap_left)} · total left {fmt_short(team_total_left(tn))}<br>
                         slots {'●' * filled}{'○' * max(0, slots)} {filled}/{cat['slots_per_team']}
                       </div>
@@ -900,7 +942,7 @@ with tab_auction:
                                   "No available players remain (recycle unsold from the "
                                   "Players tab if needed). ")
                                + "Pick the next category above — leftover cap money "
-                                 "stays behind.")
+                                 "carries forward and raises the caps there.")
                 else:
                     c1, c2, c3 = st.columns([2, 1, 1])
                     pick = c1.selectbox(
@@ -1073,6 +1115,10 @@ with tab_dash:
                 cat = get_category(cn)
                 row[f"{cn} filled"] = (f"{len(team_players(tn, cn))}/"
                                        f"{cat['slots_per_team']}")
+                carry = team_carryover(tn, cn)
+                row[f"{cn} cap (set + carry)"] = (
+                    f"{fmt_short(cat['max_cap'])} + {fmt_short(carry)} = "
+                    f"{fmt_short(team_effective_cap(tn, cn))}")
                 row[f"{cn} cap left"] = fmt_short(max(0, team_cap_left(tn, cn)))
             row["Spent"] = fmt_short(team_spent(tn))
             row["Total left ⚖️"] = fmt_short(team_total_left(tn))
@@ -1095,6 +1141,8 @@ with tab_dash:
                     f"<span class='cat-chip' style='background:{color}22;color:{color};"
                     f"border:1px solid {color}66'>"
                     f"{cn} {len(team_players(tn, cn))}/{get_category(cn)['slots_per_team']}"
+                    f" · cap {fmt_short(team_effective_cap(tn, cn))} "
+                    f"({fmt_short(get_category(cn)['max_cap'])}+{fmt_short(team_carryover(tn, cn))})"
                     f" · {fmt_short(max(0, team_cap_left(tn, cn)))} left</span>"
                     for cn in cat_names)
                 st.markdown(f"""
